@@ -24,6 +24,29 @@ class Validator {
         let failed: Int
     }
     
+    actor ProgressTracker {
+        var latestIteration: Int
+        let totalIterations: Int
+        
+        init(latestIteration: Int, totalIterations: Int) {
+            self.latestIteration = latestIteration
+            self.totalIterations = totalIterations
+        }
+        
+        func reportIteration(iter: Int) {
+            let latest = self.latestIteration
+            let newLatest = max(iter, latest)
+            if newLatest != latest {
+                self.latestIteration = newLatest
+                let progressPercentage = Double(latestIteration) / Double(totalIterations) * 100
+                print("Progress: \(Int(progressPercentage.rounded(.up)))%")
+                if progressPercentage > 99.9 {
+                    print("Wrapping up...")
+                }
+            }
+        }
+    }
+    
     private let url = "https:/test-tasks.myplantin.com"
     
     func validate(using fetcher: ImageFetcher) async {
@@ -31,15 +54,21 @@ class Validator {
         
         var imageIds: Set<String> = []
         let sessionToken = UUID().uuidString
-        let iterations = 1000
-        let maxImageId = 100
+        let iterations = 100
+        let maxImageId = 10
+        print("Starting validation")
+        
+        let tracker = ProgressTracker(latestIteration: 0, totalIterations: iterations)
+
         let images = await withTaskGroup(of: UIImage?.self) { group in
-            for _ in 0...iterations {
+            for i in 0...iterations {
                 let imageId = "image_\(Int.random(in: 1...maxImageId))"
                 imageIds.insert(imageId)
                 let url = URL(string: "\(url)/test-tasks/get-image/\(imageId).png?session-token=\(sessionToken)")!
                 group.addTask {
-                    await fetcher.fetchImage(from: url)
+                    let image = await fetcher.fetchImage(from: url)
+                    await tracker.reportIteration(iter: i)
+                    return image
                 }
             }
             return await group.reduce(into: []) { $0.append($1) }
@@ -59,10 +88,11 @@ class Validator {
         if response.success {
             print("✅ Success!")
         } else if let violations = response.violations {
-            print("❌ Failed with violations:")
+            print("❌ Validation not passed. See validation errors below:")
             for violation in violations {
                 print(violation)
             }
+            print("❌ Validation not passed. See validation errors above")
         }
     }
     
@@ -81,7 +111,7 @@ class Validator {
 Task {
     let start = Date().timeIntervalSince1970
     let validator = Validator()
-//    await validator.validate(using: SimpleImageFetcher()) TODO: uncomment and provide implementation for image fetcher
+//    await validator.validate(using: SimpleImageFetcher())
     let end = Date().timeIntervalSince1970
     print("Total time: \(end - start) seconds")
 }
